@@ -1,17 +1,39 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
 
 const socket = io('http://localhost:5000')
 
-const MemoryInfo: React.FC = () => {
+interface MemoryInfoProps {
+  pid: number;
+}
+
+const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
   const [address, setAddress] = useState('')
   const [memoryData, setMemoryData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    // 获取基地址
+    socket.emit('get_base_address', { pid })
+    socket.on('base_address', (baseAddress) => {
+      setAddress(baseAddress)
+      handleMemoryRead(baseAddress)
+    })
+
+    return () => {
+      socket.off('base_address')
+      socket.off('memory_data')
+    }
+  }, [pid])
+
+  const handleMemoryRead = (addr: string) => {
+    setLoading(true)
+    socket.emit('read_memory', { address: parseInt(addr, 16), size: 64 })
+  }
+
   const handleAddressSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    socket.emit('read_memory', { address: parseInt(address, 16), size: 64 })
+    handleMemoryRead(address)
   }
 
   socket.on('memory_data', (data) => {

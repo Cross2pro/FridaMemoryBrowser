@@ -21,6 +21,8 @@
     "vite": "^5.4.8"
   },
   "dependencies": {
+    "@types/lodash": "^4.17.10",
+    "lodash": "^4.17.21",
     "react-router-dom": "^6.3.0",
     "socket.io-client": "^4.5.1"
   }

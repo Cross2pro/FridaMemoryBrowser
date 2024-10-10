@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS
+
 import frida
 import json
 import os
@@ -10,6 +12,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 frontend_dist_dir = os.path.join(current_dir, '..', 'frontend', 'dist')
 
 app = Flask(__name__, static_folder=frontend_dist_dir, static_url_path='')
+CORS(app, resources={r"/*": {"origins": "*"}})  # 为所有路由启用 CORS
+
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # 连接到目标进程
