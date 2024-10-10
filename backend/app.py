@@ -21,7 +21,7 @@ def get_processes():
     device = get_device()
     processes = device.enumerate_processes()
     return jsonify([{'pid': p.pid, 'name': p.name} for p in processes])
-
+    
 script = None
 
 @app.route('/')
