@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
-import { debounce } from 'lodash'  // 请确保安装了 lodash: npm install lodash @types/lodash
+import { debounce } from 'lodash'
 
 const socket = io('http://localhost:5000')
 
@@ -16,10 +16,20 @@ const ProcessList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [sortKey, setSortKey] = useState<'pid' | 'name'>('pid')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [attachingPid, setAttachingPid] = useState<number | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     fetchProcesses()
+
+    // 监听 attach 和 inject 的结果
+    socket.on('attach_result', handleAttachResult)
+    socket.on('inject_result', handleInjectResult)
+
+    return () => {
+      socket.off('attach_result', handleAttachResult)
+      socket.off('inject_result', handleInjectResult)
+    }
   }, [])
 
   const fetchProcesses = async () => {
@@ -35,8 +45,29 @@ const ProcessList: React.FC = () => {
   }
 
   const handleProcessSelect = (pid: number) => {
+    setAttachingPid(pid)
     socket.emit('attach', { pid })
-    navigate(`/process/${pid}`)
+  }
+
+  const handleAttachResult = (result: { success: boolean, pid: number, error?: string }) => {
+    if (result.success) {
+      console.log(`Successfully attached to process ${result.pid}`)
+      // 在成功 attach 后，立即执行脚本注入
+      socket.emit('inject_script', { pid: result.pid })
+    } else {
+      console.error(`Failed to attach to process ${result.pid}: ${result.error}`)
+      setAttachingPid(null)
+    }
+  }
+
+  const handleInjectResult = (result: { success: boolean, pid: number }) => {
+    setAttachingPid(null)
+    if (result.success) {
+      console.log(`Successfully injected script into process ${result.pid}`)
+      navigate(`/process/${result.pid}`)
+    } else {
+      console.error(`Failed to inject script into process ${result.pid}`)
+    }
   }
 
   const debouncedSearch = useMemo(
@@ -108,11 +139,18 @@ const ProcessList: React.FC = () => {
               {filteredAndSortedProcesses.map((process) => (
                 <tr
                   key={process.pid}
-                  className="hover:bg-gray-50 cursor-pointer transition duration-150 ease-in-out"
+                  className={`hover:bg-gray-50 cursor-pointer transition duration-150 ease-in-out ${
+                    attachingPid === process.pid ? 'bg-blue-100' : ''
+                  }`}
                   onClick={() => handleProcessSelect(process.pid)}
                 >
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{process.pid}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{process.name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {process.name}
+                    {attachingPid === process.pid && (
+                      <span className="ml-2 text-blue-500">Attaching...</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

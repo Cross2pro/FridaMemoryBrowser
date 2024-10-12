@@ -1,62 +1,49 @@
-// ... 现有代码 ...
-
-import { addListener } from "process";
-
 export class MemBrowserAgent {
+    private baseAddress: NativePointer;
+
     constructor() {
-        this.init();
+        // 在构造函数中初始化 baseAddress
+        this.baseAddress = Process.getModuleByName(Process.enumerateModules()[0].name).base;
+        console.log('Agent initialized. Base address: ' + this.baseAddress);
+        
     }
 
-    init() {
-        // ... 现有代码 ...
+    // 移除 init 方法，因为我们已经在构造函数中初始化了
+    // private init() {
+    //     this.baseAddress = Process.getModuleByName(Process.enumerateModules()[0].name).base;
+    //     console.log('Agent initialized. Base address: ' + this.baseAddress);
+    // }
 
-        // 添加与服务端通信的逻辑
-        this.setupCommunication();
+    public getBaseAddress(): string {
+        return this.baseAddress.toString();
     }
-    readMemory(address: number, size: number){
+
+    public readMemory(address: number, size: number): ArrayBuffer {
         console.log(`Reading ${size} bytes from address ${address}`);
-        return ptr(address).readByteArray(size);
+        const data = ptr(address).readByteArray(size);
+        if (!data) {
+            throw new Error(`Failed to read memory at address ${address}`);
+        }
+        return data;
     }
     
-    writeMemory(address: number, data: ArrayBuffer) {
+    public writeMemory(address: number, data: ArrayBuffer) {
         console.log(`Writing ${data.byteLength} bytes to address ${address}`);
         ptr(address).writeByteArray(data);
     }
     
-    searchMemory(pattern: string, rangeStart: number, rangeEnd: number) {
+    public searchMemory(pattern: string, rangeStart: number, rangeEnd: number) {
         console.log(`Searching for pattern ${pattern} from ${rangeStart} to ${rangeEnd}`);
         const results = Memory.scanSync(ptr(rangeStart), rangeEnd - rangeStart, pattern);
         return results.map(match => ({ address: match.address.toString(), size: match.size }));
     }
-
-    setupCommunication() {
-        send({ type: 'agent_ready' });
-    
-        const handleMessage = (message: any) => {
-            if (message.type === 'read_memory') {
-                const { address, size } = message;
-                const data = this.readMemory(address, size);
-                send({ type: 'memory_data', data:data });
-            } else if (message.type === 'write_memory') {
-                const { address, data } = message;
-                this.writeMemory(address, data);
-                send({ type: 'write_success' });
-            } else if (message.type === 'search_memory') {
-                const { pattern, rangeStart, rangeEnd } = message;
-                const results = this.searchMemory(pattern, rangeStart, rangeEnd);
-                send({ type: 'search_results', results });
-            }
-    
-            // 使用 setImmediate 来异步地监听下一条消息
-            setImmediate(() => recv(handleMessage));
-        };
-    
-        // 开始监听消息
-        recv(handleMessage);
-    }
-
-
-    // ... 现有代码 ...
 }
 
 const agent = new MemBrowserAgent();
+
+rpc.exports = {
+    getBaseAddress: () => agent.getBaseAddress(),
+    readMemory: (address: number, size: number) => agent.readMemory(address, size),
+    writeMemory: (address: number, data: ArrayBuffer) => agent.writeMemory(address, data),
+    searchMemory: (pattern: string, rangeStart: number, rangeEnd: number) => agent.searchMemory(pattern, rangeStart, rangeEnd),
+};
