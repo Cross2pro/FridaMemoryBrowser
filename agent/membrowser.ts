@@ -78,6 +78,27 @@ export class MemBrowserAgent {
     public createHook(address: NativePointer, callback: (args: any[]) => void): InvocationListener {
         return Interceptor.attach(address, callback);
     }
+
+    public getModuleImports(moduleName: string): any[] {
+        const module = Process.getModuleByName(moduleName);
+        return module.enumerateImports().map(imp => ({
+            name: imp.name,
+            address: imp.address ? imp.address.toString() : 'Unknown'
+        }));
+    }
+
+    public getModuleExports(moduleName: string): any[] {
+        const module = Process.getModuleByName(moduleName);
+        return module.enumerateExports().map(exp => ({
+            name: exp.name,
+            address: exp.address ? exp.address.toString() : 'Unknown'
+        }));
+    }
+
+    public dumpModule(moduleName: string): ArrayBuffer {
+        const module = Process.getModuleByName(moduleName);
+        return module.base.readByteArray(module.size) as ArrayBuffer;
+    }
 }
 
 const agent = new MemBrowserAgent();
@@ -96,4 +117,7 @@ rpc.exports = {
     enumerateThreads: () => agent.enumerateThreads(),
     setExceptionHandler: (callback: (details: any) => void) => agent.setExceptionHandler(callback),
     createHook: (address: string, callback: (args: any[]) => void) => agent.createHook(ptr(address), callback),
+    getModuleImports: (moduleName: string) => agent.getModuleImports(moduleName),
+    getModuleExports: (moduleName: string) => agent.getModuleExports(moduleName),
+    dumpModule: (moduleName: string) => agent.dumpModule(moduleName),
 };

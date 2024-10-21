@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import frida
@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import logging
+from io import BytesIO
 
 # 获取当前文件的目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -213,6 +214,71 @@ def handle_write_memory(data):
         socketio.emit('write_result', {'success': True, 'pid': pid})
     except Exception as e:
         socketio.emit('write_result', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_module_details')
+def handle_get_module_details(data):
+    pid = data['pid']
+    module_name = data['moduleName']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        imports = script.exports_sync.get_module_imports(module_name)
+        exports = script.exports_sync.get_module_exports(module_name)
+        socketio.emit('module_details', {'success': True, 'pid': pid, 'imports': imports, 'exports': exports})
+    except Exception as e:
+        socketio.emit('module_details', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('dump_module')
+def handle_dump_module(data):
+    pid = data['pid']
+    module_name = data['moduleName']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        dump_data = script.exports_sync.dump_module(module_name)
+        file_name = f"{module_name}_{pid}.bin"
+        
+        # 创建一个内存文件对象
+        mem_file = BytesIO(dump_data)
+        
+        # 发送文件到客户端
+        return send_file(
+            mem_file,
+            as_attachment=True,
+            download_name=file_name,
+            mimetype='application/octet-stream'
+        )
+    except Exception as e:
+        socketio.emit('module_dumped', {'success': False, 'pid': pid, 'error': str(e)})
+
+@app.route('/dump_module')
+def download_module():
+    pid = request.args.get('pid')
+    module_name = request.args.get('moduleName')
+    try:
+        _, script = sessions.get(int(pid), (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        dump_data = script.exports_sync.dump_module(module_name)
+        file_name = f"{module_name}_{pid}.bin"
+        
+        # 创建一个内存文件对象
+        mem_file = BytesIO(dump_data)
+        
+        # 发送文件到客户端
+        return send_file(
+            mem_file,
+            as_attachment=True,
+            download_name=file_name,
+            mimetype='application/octet-stream'
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def compile_agent():
     agent_dir = os.path.join(current_dir, '..', 'agent')
