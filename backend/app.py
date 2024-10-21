@@ -126,6 +126,11 @@ def handle_enumerate_modules(data):
             raise Exception("Script not found for pid: " + str(pid))
         
         modules = script.exports_sync.enumerate_modules()
+        for module in modules:
+            imports = script.exports_sync.get_module_imports(module['name'])
+            exports = script.exports_sync.get_module_exports(module['name'])
+            module['importCount'] = len(imports)
+            module['exportCount'] = len(exports)
         socketio.emit('modules_list', {'success': True, 'pid': pid, 'modules': modules})
     except Exception as e:
         socketio.emit('modules_list', {'success': False, 'pid': pid, 'error': str(e)})

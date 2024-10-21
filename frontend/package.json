@@ -22,7 +22,9 @@
   },
   "dependencies": {
     "@types/lodash": "^4.17.10",
+    "@types/react-resizable": "^3.0.8",
     "lodash": "^4.17.21",
+    "react-resizable": "^3.0.5",
     "react-router-dom": "^6.3.0",
     "react-toastify": "^10.0.5",
     "react-virtualized-auto-sizer": "^1.0.24",
