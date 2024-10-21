@@ -98,7 +98,7 @@ def handle_read_memory(data):
         if script is None:
             raise Exception("Script not found for pid: " + str(pid))
         
-        result = script.exports.read_memory(address, size)
+        result = script.exports_sync.read_memory(address, size)
         socketio.emit('memory_data', {'success': True, 'pid': pid, 'data': result})
     except Exception as e:
         socketio.emit('memory_data', {'success': False, 'pid': pid, 'error': str(e)})
@@ -111,10 +111,108 @@ def handle_get_base_address(data):
         if script is None:
             raise Exception("Script not found for pid: " + str(pid))
         
-        base_address = script.exports.get_base_address()
+        base_address = script.exports_sync.get_base_address()
         socketio.emit('base_address', {'success': True, 'pid': pid, 'address': base_address})
     except Exception as e:
         socketio.emit('base_address', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('enumerate_modules')
+def handle_enumerate_modules(data):
+    pid = data['pid']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        modules = script.exports_sync.enumerate_modules()
+        socketio.emit('modules_list', {'success': True, 'pid': pid, 'modules': modules})
+    except Exception as e:
+        socketio.emit('modules_list', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_module_info')
+def handle_get_module_info(data):
+    pid = data['pid']
+    module_name = data['module_name']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        module_info = script.exports_sync.get_module_info(module_name)
+        socketio.emit('module_info', {'success': True, 'pid': pid, 'module_info': module_info})
+    except Exception as e:
+        socketio.emit('module_info', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_module_ranges')
+def handle_get_module_ranges(data):
+    pid = data['pid']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        module_ranges = script.exports_sync.get_module_ranges()
+        socketio.emit('module_ranges', {'success': True, 'pid': pid, 'module_ranges': module_ranges})
+    except Exception as e:
+        socketio.emit('module_ranges', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_process_info')
+def handle_get_process_info(data):
+    pid = data['pid']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        process_id = script.exports_sync.get_process_id()
+        process_name = script.exports_sync.get_process_name()
+        socketio.emit('process_info', {'success': True, 'pid': pid, 'process_id': process_id, 'process_name': process_name})
+    except Exception as e:
+        socketio.emit('process_info', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('enumerate_threads')
+def handle_enumerate_threads(data):
+    pid = data['pid']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        threads = script.exports.enumerate_threads()
+        socketio.emit('threads_list', {'success': True, 'pid': pid, 'threads': threads})
+    except Exception as e:
+        socketio.emit('threads_list', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('search_memory')
+def handle_search_memory(data):
+    pid = data['pid']
+    pattern = data['pattern']
+    range_start = data['range_start']
+    range_end = data['range_end']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        results = script.exports_sync.search_memory(pattern, range_start, range_end)
+        socketio.emit('search_results', {'success': True, 'pid': pid, 'results': results})
+    except Exception as e:
+        socketio.emit('search_results', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('write_memory')
+def handle_write_memory(data):
+    pid = data['pid']
+    address = data['address']
+    bytes_data = data['data']
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            raise Exception("Script not found for pid: " + str(pid))
+        
+        script.exports_sync.write_memory(address, bytes_data)
+        socketio.emit('write_result', {'success': True, 'pid': pid})
+    except Exception as e:
+        socketio.emit('write_result', {'success': False, 'pid': pid, 'error': str(e)})
 
 def compile_agent():
     agent_dir = os.path.join(current_dir, '..', 'agent')

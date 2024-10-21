@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { io } from 'socket.io-client'
+import { toast } from 'react-toastify'; // 请确保已安装 react-toastify
 
 const socket = io('http://localhost:5000')
 
@@ -21,6 +22,11 @@ interface MemoryRow {
   dataType: DataType;
 }
 
+interface ModuleRange {
+  base: string;
+  size: number;
+}
+
 const DISPLAY_SIZE = 128; // 显示的内存大小
 const READ_BUFFER = 512; // 实际读取的内存大小
 
@@ -29,8 +35,8 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
   const [displayAddress, setDisplayAddress] = useState('')
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [dataType, setDataType] = useState<DataType>('QWORD')
-  const [pageSize, setPageSize] = useState(64)
+  const [moduleRanges, setModuleRanges] = useState<ModuleRange[]>([]);
+
   const containerRef = useRef<HTMLDivElement>(null)
   const [memoryRows, setMemoryRows] = useState<MemoryRow[]>([])
   const [currentAddress, setCurrentAddress] = useState<number>(0)
@@ -50,17 +56,40 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
       setLoading(false)
     })
 
+    socket.on('module_ranges', (data: { success: boolean, pid: number, module_ranges: ModuleRange[] }) => {
+      if (data.success) {
+        setModuleRanges(data.module_ranges);
+      }
+    })
+
+    // 获取模块范围
+    socket.emit('get_module_ranges', { pid });
+
     return () => {
       socket.off('base_address')
       socket.off('memory_data')
+      socket.off('module_ranges')
     }
   }, [pid])
 
+  const isAddressValid = (addr: number): boolean => {
+    return moduleRanges.some(range => {
+      const rangeStart = parseInt(range.base, 16);
+      const rangeEnd = rangeStart + range.size;
+      return addr >= rangeStart && addr < rangeEnd;
+    });
+  }
+
   const handleMemoryRead = (addr: string, direction: 'up' | 'down' = 'down') => {
-    setLoading(true)
-    const addrNum = parseInt(addr, 16)
-    const readAddress = direction === 'up' ? addrNum - READ_BUFFER : addrNum
-    socket.emit('read_memory', { pid, address: readAddress, size: READ_BUFFER })
+    const addrNum = parseInt(addr, 16);
+    const readAddress = direction === 'up' ? addrNum - READ_BUFFER : addrNum;
+    
+    if (isAddressValid(readAddress)) {
+      setLoading(true);
+      socket.emit('read_memory', { pid, address: readAddress, size: READ_BUFFER });
+    } else {
+      toast.error('无效的内存地址!');
+    }
   }
 
   const handleAddressSubmit = (e: React.FormEvent) => {
@@ -72,12 +101,16 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
     if (scrollHeight - scrollTop <= clientHeight + 1) {
       // 滚动到底部，加载更多数据
-      const newAddress = currentAddress + DISPLAY_SIZE
-      handleMemoryRead(newAddress.toString(16), 'down')
+      const newAddress = currentAddress + DISPLAY_SIZE;
+      if (isAddressValid(newAddress)) {
+        handleMemoryRead(newAddress.toString(16), 'down');
+      }
     } else if (scrollTop === 0) {
       // 滚动到顶部，加载更多数据
-      const newAddress = currentAddress - DISPLAY_SIZE
-      handleMemoryRead(newAddress.toString(16), 'up')
+      const newAddress = currentAddress - DISPLAY_SIZE;
+      if (isAddressValid(newAddress)) {
+        handleMemoryRead(newAddress.toString(16), 'up');
+      }
     }
   }
 

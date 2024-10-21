@@ -2,17 +2,9 @@ export class MemBrowserAgent {
     private baseAddress: NativePointer;
 
     constructor() {
-        // 在构造函数中初始化 baseAddress
         this.baseAddress = Process.getModuleByName(Process.enumerateModules()[0].name).base;
         console.log('Agent initialized. Base address: ' + this.baseAddress);
-        
     }
-
-    // 移除 init 方法，因为我们已经在构造函数中初始化了
-    // private init() {
-    //     this.baseAddress = Process.getModuleByName(Process.enumerateModules()[0].name).base;
-    //     console.log('Agent initialized. Base address: ' + this.baseAddress);
-    // }
 
     public getBaseAddress(): string {
         return this.baseAddress.toString();
@@ -37,6 +29,55 @@ export class MemBrowserAgent {
         const results = Memory.scanSync(ptr(rangeStart), rangeEnd - rangeStart, pattern);
         return results.map(match => ({ address: match.address.toString(), size: match.size }));
     }
+
+    // 新增的模块操作方法
+    public enumerateModules(): any[] {
+        return Process.enumerateModules().map(module => ({
+            name: module.name,
+            base: module.base.toString(),
+            size: module.size,
+            path: module.path
+        }));
+    }
+
+    public getModuleInfo(moduleName: string): any {
+        const module = Process.getModuleByName(moduleName);
+        return {
+            name: module.name,
+            base: module.base.toString(),
+            size: module.size,
+            path: module.path
+        };
+    }
+
+    public getModuleRanges(): any[] {
+        return Process.enumerateRanges('r-x').map(range => ({
+            base: range.base.toString(),
+            size: range.size
+        }));
+    }
+
+    // 新增的进程操作方法
+    public getProcessId(): number {
+        return Process.id;
+    }
+
+    public getProcessName(): string {
+        return Process.enumerateModules()[0].name;
+    }
+
+    // 其他有用的操作
+    public enumerateThreads(): ThreadDetails[] {
+        return Process.enumerateThreads();
+    }
+
+    public setExceptionHandler(callback: (details: any) => void): void {
+        Process.setExceptionHandler(callback);
+    }
+
+    public createHook(address: NativePointer, callback: (args: any[]) => void): InvocationListener {
+        return Interceptor.attach(address, callback);
+    }
 }
 
 const agent = new MemBrowserAgent();
@@ -46,4 +87,13 @@ rpc.exports = {
     readMemory: (address: number, size: number) => agent.readMemory(address, size),
     writeMemory: (address: number, data: ArrayBuffer) => agent.writeMemory(address, data),
     searchMemory: (pattern: string, rangeStart: number, rangeEnd: number) => agent.searchMemory(pattern, rangeStart, rangeEnd),
+    // 新增的 RPC 导出
+    enumerateModules: () => agent.enumerateModules(),
+    getModuleInfo: (moduleName: string) => agent.getModuleInfo(moduleName),
+    getModuleRanges: () => agent.getModuleRanges(),
+    getProcessId: () => agent.getProcessId(),
+    getProcessName: () => agent.getProcessName(),
+    enumerateThreads: () => agent.enumerateThreads(),
+    setExceptionHandler: (callback: (details: any) => void) => agent.setExceptionHandler(callback),
+    createHook: (address: string, callback: (args: any[]) => void) => agent.createHook(ptr(address), callback),
 };
