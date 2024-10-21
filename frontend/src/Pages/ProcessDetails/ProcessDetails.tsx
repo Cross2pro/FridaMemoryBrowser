@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import MemoryInfo from './MemoryInfo'
+import MemoryInfo from './MemoryView/MemoryInfo'
 
 const ProcessDetails: React.FC = () => {
   const { pid } = useParams<{ pid: string }>()

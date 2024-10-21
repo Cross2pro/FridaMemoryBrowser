@@ -1,7 +1,7 @@
 import React from 'react'
 import { Routes, Route } from 'react-router-dom'
-import ProcessList from './components/ProcessList'
-import ProcessDetails from './components/ProcessDetails'
+import ProcessList from './Pages/ProcessList/ProcessList'
+import ProcessDetails from './Pages/ProcessDetails/ProcessDetails'
 
 const App: React.FC = () => {
   return (
