@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { io } from 'socket.io-client'
 import { toast } from 'react-toastify'; // 请确保已安装 react-toastify
 import { FixedSizeList as List } from 'react-window'
 import AutoSizer from 'react-virtualized-auto-sizer'
+import HexView from './HexView';
 
 const socket = io('http://localhost:5000')
 
@@ -203,6 +204,11 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
     )
   }
 
+  const handleJump = useCallback((jumpAddress: string) => {
+    setAddress(jumpAddress);
+    handleAddressSubmit(new Event('submit') as any);
+  }, [handleAddressSubmit]);
+
   return (
     <div>
       <form onSubmit={handleAddressSubmit} className="mb-6">
@@ -226,21 +232,40 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
       {loading ? (
         <div className="text-center">加载中...</div>
       ) : (
-        <div className="h-96">
-          <AutoSizer>
-            {({ height, width }) => (
-              <List
-                ref={listRef}
-                height={height}
-                itemCount={memoryRows.length}
-                itemSize={50}
-                width={width}
-              >
-                {Row}
-              </List>
-            )}
-          </AutoSizer>
-        </div>
+        <>
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold mb-4">内存数据表格视图</h3>
+            <div className="h-96">
+              <AutoSizer>
+                {({ height, width }) => (
+                  <List
+                    ref={listRef}
+                    height={height}
+                    itemCount={memoryRows.length}
+                    itemSize={50}
+                    width={width}
+                  >
+                    {Row}
+                  </List>
+                )}
+              </AutoSizer>
+            </div>
+          </div>
+          
+          {memoryData && memoryData.success && (
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold mb-4">十六进制视图</h3>
+              <div className="bg-white shadow-md rounded-lg overflow-hidden">
+                <HexView 
+                  data={memoryData.data} 
+                  bytesPerRow={16} 
+                  startAddress={currentModuleBase}
+                  onJump={handleJump}
+                />
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
