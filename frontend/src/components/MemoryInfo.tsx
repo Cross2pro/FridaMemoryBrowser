@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { io } from 'socket.io-client'
 import { toast } from 'react-toastify'; // 请确保已安装 react-toastify
+import { FixedSizeList as List } from 'react-window'
+import AutoSizer from 'react-virtualized-auto-sizer'
 
 const socket = io('http://localhost:5000')
 
@@ -27,27 +29,32 @@ interface ModuleRange {
   size: number;
 }
 
-const DISPLAY_SIZE = 128; // 显示的内存大小
-const READ_BUFFER = 512; // 实际读取的内存大小
+
 
 const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
   const [address, setAddress] = useState('')
-  const [displayAddress, setDisplayAddress] = useState('')
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [moduleRanges, setModuleRanges] = useState<ModuleRange[]>([]);
-
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [moduleRanges, setModuleRanges] = useState<ModuleRange[]>([])
   const [memoryRows, setMemoryRows] = useState<MemoryRow[]>([])
-  const [currentAddress, setCurrentAddress] = useState<number>(0)
+  const [currentModuleBase, setCurrentModuleBase] = useState<string>('')
+  const [currentModuleSize, setCurrentModuleSize] = useState<number>(0)
+
+  const listRef = useRef<List>(null)
 
   useEffect(() => {
-    socket.emit('get_base_address', { pid })
-    socket.on('base_address', (baseAddressPacket: { success: boolean, pid: number, address: string }) => {
-      if (baseAddressPacket.success) {
-        setAddress(baseAddressPacket.address)
-        setDisplayAddress(baseAddressPacket.address)
-        handleMemoryRead(baseAddressPacket.address)
+    socket.on('module_ranges', (data: { success: boolean, pid: number, module_ranges: ModuleRange[] }) => {
+      if (data.success) {
+        setModuleRanges(data.module_ranges)
+        // 自动选择第一个模块并加载其数据
+        if (data.module_ranges.length > 0) {
+          const firstModule = data.module_ranges[0]
+          setCurrentModuleBase(firstModule.base)
+          setCurrentModuleSize(firstModule.size)
+          setAddress(firstModule.base)
+          setLoading(true)
+          socket.emit('read_memory', { pid, address: firstModule.base, size: firstModule.size })
+        }
       }
     })
 
@@ -56,61 +63,30 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
       setLoading(false)
     })
 
-    socket.on('module_ranges', (data: { success: boolean, pid: number, module_ranges: ModuleRange[] }) => {
-      if (data.success) {
-        setModuleRanges(data.module_ranges);
-      }
-    })
-
-    // 获取模块范围
-    socket.emit('get_module_ranges', { pid });
+    socket.emit('get_module_ranges', { pid })
 
     return () => {
-      socket.off('base_address')
-      socket.off('memory_data')
       socket.off('module_ranges')
+      socket.off('memory_data')
     }
   }, [pid])
 
-  const isAddressValid = (addr: number): boolean => {
-    return moduleRanges.some(range => {
-      const rangeStart = parseInt(range.base, 16);
-      const rangeEnd = rangeStart + range.size;
-      return addr >= rangeStart && addr < rangeEnd;
-    });
-  }
-
-  const handleMemoryRead = (addr: string, direction: 'up' | 'down' = 'down') => {
-    const addrNum = parseInt(addr, 16);
-    const readAddress = direction === 'up' ? addrNum - READ_BUFFER : addrNum;
-    
-    if (isAddressValid(readAddress)) {
-      setLoading(true);
-      socket.emit('read_memory', { pid, address: readAddress, size: READ_BUFFER });
-    } else {
-      toast.error('无效的内存地址!');
-    }
-  }
-
   const handleAddressSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    handleMemoryRead(address)
-  }
+    const moduleRange = moduleRanges.find(range => {
+      const rangeStart = parseInt(range.base, 16)
+      const rangeEnd = rangeStart + range.size
+      const targetAddress = parseInt(address, 16)
+      return targetAddress >= rangeStart && targetAddress < rangeEnd
+    })
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
-    if (scrollHeight - scrollTop <= clientHeight + 1) {
-      // 滚动到底部，加载更多数据
-      const newAddress = currentAddress + DISPLAY_SIZE;
-      if (isAddressValid(newAddress)) {
-        handleMemoryRead(newAddress.toString(16), 'down');
-      }
-    } else if (scrollTop === 0) {
-      // 滚动到顶部，加载更多数据
-      const newAddress = currentAddress - DISPLAY_SIZE;
-      if (isAddressValid(newAddress)) {
-        handleMemoryRead(newAddress.toString(16), 'up');
-      }
+    if (moduleRange) {
+      setLoading(true)
+      setCurrentModuleBase(moduleRange.base)
+      setCurrentModuleSize(moduleRange.size)
+      socket.emit('read_memory', { pid, address: moduleRange.base, size: moduleRange.size })
+    } else {
+      toast.error('无效的内存地址!')
     }
   }
 
@@ -164,7 +140,7 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
         const prevSize = getTypeSize(updatedRows[i-1].dataType);
         updatedRows[i].address = (prevAddress + prevSize).toString(16).toUpperCase().padStart(8, '0');
       }
-      updatedRows[i].value = formatValue(new DataView(memoryData!.data), parseInt(updatedRows[i].address, 16) - parseInt(displayAddress, 16), updatedRows[i].dataType);
+      updatedRows[i].value = formatValue(new DataView(memoryData!.data), parseInt(updatedRows[i].address, 16) - parseInt(currentModuleBase, 16), updatedRows[i].dataType);
     }
     
     setMemoryRows(updatedRows);
@@ -172,57 +148,43 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
 
   useEffect(() => {
     if (memoryData && memoryData.success) {
-      const view = new DataView(memoryData.data);
-      const rows: MemoryRow[] = [];
-      let currentOffset = 0;
+      const view = new DataView(memoryData.data)
+      const rows: MemoryRow[] = []
 
-      while (currentOffset < READ_BUFFER) {
-        const addr = (parseInt(displayAddress, 16) + currentOffset).toString(16).toUpperCase().padStart(16, '0');
-        const value = formatValue(view, currentOffset, 'QWORD');
+      for (let i = 0; i < currentModuleSize; i += 8) {
+        const addr = (parseInt(currentModuleBase, 16) + i).toString(16).toUpperCase().padStart(16, '0')
+        const value = formatValue(view, i, 'QWORD')
         
         rows.push({
           address: addr,
           value: value,
           dataType: 'QWORD'
-        });
-
-        currentOffset += getTypeSize('QWORD');
+        })
       }
 
-      setMemoryRows(rows);
-      setCurrentAddress(parseInt(displayAddress, 16));
-      setLoading(false);
+      setMemoryRows(rows)
+      setLoading(false)
 
-      // 保持滚动位置
-      if (containerRef.current) {
-        containerRef.current.scrollTop = (READ_BUFFER - DISPLAY_SIZE) / 2;
+      if (listRef.current) {
+        const targetIndex = Math.floor((parseInt(address, 16) - parseInt(currentModuleBase, 16)) / 8)
+        listRef.current.scrollToItem(targetIndex, 'center')
       }
     }
-  }, [memoryData, displayAddress]);
+  }, [memoryData, currentModuleBase, currentModuleSize, address])
 
-  const renderMemoryData = () => {
-    if (!memoryData || !memoryData.success) {
-      return <div>No data available</div>
-    }
+  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
+    const row = memoryRows[index]
+    if (!row) return null
 
-    return memoryRows.map((row, index) => (
-      <tr key={index} className="hover:bg-gray-50">
-        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+    return (
+      <div style={{...style, height: '50px'}} className="flex hover:bg-gray-50 items-center">
+        <div className="flex-1 px-6 whitespace-nowrap text-sm font-medium text-gray-900">
           {row.address}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {row.dataType === 'POINTER' ? (
-            <button
-              onClick={() => handleMemoryRead(row.value.slice(2))}
-              className="text-blue-500 hover:underline"
-            >
-              {row.value}
-            </button>
-          ) : (
-            row.value
-          )}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+        </div>
+        <div className="flex-1 px-6 whitespace-nowrap text-sm text-gray-500">
+          {row.value}
+        </div>
+        <div className="flex-1 px-6 whitespace-nowrap text-sm text-gray-500">
           <select
             value={row.dataType}
             onChange={(e) => handleTypeChange(index, e.target.value as DataType)}
@@ -236,9 +198,9 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
             <option value="BYTE">BYTE</option>
             <option value="POINTER">POINTER</option>
           </select>
-        </td>
-      </tr>
-    ))
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -264,23 +226,20 @@ const MemoryInfo: React.FC<MemoryInfoProps> = ({ pid }) => {
       {loading ? (
         <div className="text-center">加载中...</div>
       ) : (
-        <div 
-          ref={containerRef}
-          className="overflow-auto max-h-96"
-          onScroll={handleScroll}
-        >
-          <table className="min-w-full bg-white">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">地址</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数据</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类型</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {renderMemoryData()}
-            </tbody>
-          </table>
+        <div className="h-96">
+          <AutoSizer>
+            {({ height, width }) => (
+              <List
+                ref={listRef}
+                height={height}
+                itemCount={memoryRows.length}
+                itemSize={50}
+                width={width}
+              >
+                {Row}
+              </List>
+            )}
+          </AutoSizer>
         </div>
       )}
     </div>
