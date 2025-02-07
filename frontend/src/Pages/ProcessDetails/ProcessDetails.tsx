@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import MemoryInfo from './MemoryView/MemoryInfo'
 import ModuleInfo from './ModuleView/ModuleInfo'
+import ScriptInfo from './ScriptView/ScriptInfo'
 
 const ProcessDetails: React.FC = () => {
   const { pid } = useParams<{ pid: string }>()
@@ -10,8 +11,6 @@ const ProcessDetails: React.FC = () => {
   const tabs = [
     { id: 'memory', name: '内存信息' },
     { id: 'modules', name: '模块信息' },
-    { id: 'functions', name: '函数信息' },
-    { id: 'hooks', name: 'HOOK信息' },
     { id: 'scripts', name: '自定义脚本' },
   ]
 
@@ -40,7 +39,7 @@ const ProcessDetails: React.FC = () => {
       <div className="bg-white shadow-md rounded-lg p-6">
         {activeTab === 'memory' && <MemoryInfo pid={Number(pid)} />}
         {activeTab === 'modules' && <ModuleInfo pid={Number(pid)} />}
-        {/* 其他标签页的内容 */}
+        {activeTab === 'scripts' && <ScriptInfo pid={Number(pid)} />}
       </div>
     </div>
   )

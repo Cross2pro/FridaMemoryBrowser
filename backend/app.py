@@ -13,8 +13,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 
 project_root = os.path.dirname(current_dir)
 
-# 构建到 frontend/dist 的路径
+# 构建到 frontend/dist 和 user_scripts 的路径
 frontend_dist_dir = os.path.join(current_dir, '..', 'frontend', 'dist')
+user_scripts_dir = os.path.join(project_root, 'user_scripts')
+
+# 确保user_scripts目录存在
+os.makedirs(user_scripts_dir, exist_ok=True)
 
 app = Flask(__name__, static_folder=frontend_dist_dir, static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -31,6 +35,9 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # 全局变量来存储设备和会话
 device = None
 sessions = {}
+
+# 存储脚本执行的日志
+script_logs = {}
 
 def get_device():
     global device
@@ -284,6 +291,90 @@ def download_module():
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/scripts', methods=['GET'])
+def get_scripts():
+    try:
+        scripts = []
+        for file in os.listdir(user_scripts_dir):
+            if file.endswith('.js'):
+                script_path = os.path.join(user_scripts_dir, file)
+                with open(script_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                scripts.append({
+                    'name': file,
+                    'content': content,
+                    'path': script_path
+                })
+        return jsonify(scripts)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@socketio.on('load_script')
+def handle_load_script(data):
+    pid = data['pid']
+    script_name = data['scriptName']
+    try:
+        # 先加载helper库
+        helper_path = os.path.join(user_scripts_dir, 'frida-helper.js')
+        with open(helper_path, 'r', encoding='utf-8') as f:
+            helper_content = f.read()
+        
+        # 再加载用户脚本
+        script_path = os.path.join(user_scripts_dir, script_name)
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+        
+        # 合并脚本内容
+        combined_script = helper_content + '\n' + script_content
+        
+        session, _ = sessions.get(pid, (None, None))
+        if session is None:
+            raise Exception("Session not found for pid: " + str(pid))
+        
+        script = session.create_script(combined_script)
+        
+        def on_message(message, data):
+            if message['type'] == 'send':
+                log_data = json.loads(message['payload'])
+                if pid not in script_logs:
+                    script_logs[pid] = []
+                log_data['id'] = len(script_logs[pid]) + 1
+                script_logs[pid].append(log_data)
+                socketio.emit('script_log', {
+                    'pid': pid,
+                    'log': log_data
+                })
+            elif message['type'] == 'error':
+                socketio.emit('script_error', {
+                    'pid': pid,
+                    'error': message['description']
+                })
+        
+        script.on('message', on_message)
+        script.load()
+        sessions[pid] = (session, script)
+        socketio.emit('script_loaded', {'success': True, 'pid': pid, 'scriptName': script_name})
+    except Exception as e:
+        socketio.emit('script_loaded', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_script_logs')
+def handle_get_script_logs(data):
+    pid = data['pid']
+    try:
+        logs = script_logs.get(pid, [])
+        socketio.emit('script_logs', {'success': True, 'pid': pid, 'logs': logs})
+    except Exception as e:
+        socketio.emit('script_logs', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('clear_script_logs')
+def handle_clear_script_logs(data):
+    pid = data['pid']
+    try:
+        script_logs[pid] = []
+        socketio.emit('script_logs_cleared', {'success': True, 'pid': pid})
+    except Exception as e:
+        socketio.emit('script_logs_cleared', {'success': False, 'pid': pid, 'error': str(e)})
 
 def compile_agent():
     agent_dir = os.path.join(current_dir, '..', 'agent')
