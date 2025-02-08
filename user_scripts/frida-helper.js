@@ -55,9 +55,9 @@ const FridaHelper = {
                 }
             });
         },
-
+        
         // Hook指定地址
-        address(address, name = "未命名函数", options = {}) {
+        address(address, name = `未命名函数_${address}`, options = {}) {
             Interceptor.attach(address, {
                 onEnter: function(args) {
                     if (options.onEnter) {

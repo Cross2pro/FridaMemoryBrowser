@@ -11,7 +11,7 @@ $f.hook.exportFunction(null, 'open', {
         return retval.toInt32();  // 返回值会自动记录到日志中
     }
 });
-
+$f.hook.exportFunction
 // 监控第一个模块的内存访问
 const firstModule = $f.module.getAll()[0];
 $f.memory.watch(firstModule.base, 0x1000, {

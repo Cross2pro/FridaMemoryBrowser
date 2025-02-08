@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { io } from 'socket.io-client';
 import { FixedSizeList as List } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
@@ -27,6 +27,11 @@ interface LogEntry {
   message?: string;
 }
 
+interface LogGroup {
+  title: string;
+  logs: LogEntry[];
+}
+
 const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
@@ -36,6 +41,8 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isScriptListCollapsed, setIsScriptListCollapsed] = useState(false);
+  const [isGrouped, setIsGrouped] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     fetchScripts();
@@ -130,31 +137,117 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
     (log.message && log.message.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  if (loading) {
-    return <div className="text-center">加载中...</div>;
-  }
+  // 按函数名分组的日志
+  const groupedLogs = useMemo(() => {
+    if (!isGrouped) return null;
+
+    const groups: { [key: string]: LogEntry[] } = {};
+    filteredLogs.forEach(log => {
+      const functionName = log.title.split(' ')[0]; // 假设函数名是标题的第一个词
+      if (!groups[functionName]) {
+        groups[functionName] = [];
+      }
+      groups[functionName].push(log);
+    });
+
+    // 转换为数组并排序
+    return Object.entries(groups)
+      .map(([title, logs]) => ({
+        title,
+        logs: logs.sort((a, b) => 
+          sortOrder === 'asc' 
+            ? new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            : new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        )
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [filteredLogs, isGrouped, sortOrder]);
+
+  // 排序后的日志
+  const sortedLogs = useMemo(() => {
+    if (isGrouped) return filteredLogs;
+    return [...filteredLogs].sort((a, b) => 
+      sortOrder === 'asc'
+        ? new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        : new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [filteredLogs, sortOrder, isGrouped]);
 
   const LogRow = ({ index, style }: { index: number; style: React.CSSProperties }) => {
-    const log = filteredLogs[index];
-    return (
-      <div
-        style={style}
-        onClick={() => handleLogSelect(log)}
-        className={`cursor-pointer hover:bg-gray-100 ${selectedLog?.id === log.id ? 'bg-blue-50' : ''}`}
-      >
-        <div className="grid grid-cols-4 gap-4 py-2 px-4 items-center">
-          <div className="text-gray-600">#{log.id}</div>
-          <div className="font-medium">{log.title}</div>
-          <div className="text-sm text-gray-600">{log.type}</div>
-          <div className="text-sm text-gray-600">{log.timestamp}</div>
+    if (isGrouped && groupedLogs) {
+      // 计算当前行所属的组和组内索引
+      let currentGroup = 0;
+      let currentIndex = index;
+      
+      while (currentIndex >= 0 && currentGroup < groupedLogs.length) {
+        if (currentIndex < groupedLogs[currentGroup].logs.length + 1) {
+          break;
+        }
+        currentIndex -= groupedLogs[currentGroup].logs.length + 1;
+        currentGroup++;
+      }
+
+      if (currentGroup >= groupedLogs.length) return null;
+
+      // 如果是组标题
+      if (currentIndex === 0) {
+        return (
+          <div style={style} className="bg-gray-200 py-2 px-4 font-semibold">
+            {groupedLogs[currentGroup].title} ({groupedLogs[currentGroup].logs.length})
+          </div>
+        );
+      }
+
+      // 组内的日志项
+      const log = groupedLogs[currentGroup].logs[currentIndex - 1];
+      return (
+        <div
+          style={style}
+          onClick={() => handleLogSelect(log)}
+          className={`cursor-pointer hover:bg-gray-100 pl-8 ${selectedLog?.id === log.id ? 'bg-blue-50' : ''}`}
+        >
+          <div className="grid grid-cols-4 gap-4 py-2 px-4 items-center">
+            <div className="text-gray-600">#{log.id}</div>
+            <div className="font-medium">{log.title}</div>
+            <div className="text-sm text-gray-600">{log.type}</div>
+            <div className="text-sm text-gray-600">{log.timestamp}</div>
+          </div>
         </div>
-      </div>
-    );
+      );
+    } else {
+      const log = sortedLogs[index];
+      return (
+        <div
+          style={style}
+          onClick={() => handleLogSelect(log)}
+          className={`cursor-pointer hover:bg-gray-100 ${selectedLog?.id === log.id ? 'bg-blue-50' : ''}`}
+        >
+          <div className="grid grid-cols-4 gap-4 py-2 px-4 items-center">
+            <div className="text-gray-600">#{log.id}</div>
+            <div className="font-medium">{log.title}</div>
+            <div className="text-sm text-gray-600">{log.type}</div>
+            <div className="text-sm text-gray-600">{log.timestamp}</div>
+          </div>
+        </div>
+      );
+    }
+  };
+
+  const getItemCount = () => {
+    if (isGrouped && groupedLogs) {
+      // 计算所有组的总行数（每个组的日志数量 + 组标题行）
+      return groupedLogs.reduce((sum, group) => sum + group.logs.length + 1, 0);
+    }
+    return sortedLogs.length;
   };
 
   const getScriptInitial = (scriptName: string) => {
     return scriptName.charAt(0).toUpperCase();
   };
+
+  if (loading) {
+    return <div className="text-center">加载中...</div>;
+  }
 
   return (
     <div className="container mx-auto p-4">
@@ -215,17 +308,33 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
 
         {/* 日志区域 */}
         <div className="flex-1 flex flex-col">
-          {/* 搜索和清除按钮 */}
+          {/* 搜索、分组和清除按钮 */}
           <div className="flex justify-between items-center mb-4">
-            <input
-              type="text"
-              placeholder="搜索日志..."
-              className="flex-1 p-2 border rounded mr-4"
-              onChange={(e) => debouncedSearch(e.target.value)}
-            />
+            <div className="flex-1 flex items-center gap-4">
+              <input
+                type="text"
+                placeholder="搜索日志..."
+                className="flex-1 p-2 border rounded"
+                onChange={(e) => debouncedSearch(e.target.value)}
+              />
+              <button
+                onClick={() => setIsGrouped(!isGrouped)}
+                className={`px-4 py-2 rounded ${
+                  isGrouped ? 'bg-blue-500 text-white' : 'bg-gray-200'
+                }`}
+              >
+                {isGrouped ? '取消分组' : '按函数分组'}
+              </button>
+              <button
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                className="px-4 py-2 bg-gray-200 rounded"
+              >
+                {sortOrder === 'asc' ? '↑ 时间升序' : '↓ 时间降序'}
+              </button>
+            </div>
             <button
               onClick={handleClearLogs}
-              className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+              className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 ml-4"
             >
               清除日志
             </button>
@@ -244,7 +353,7 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
                 {({ height, width }) => (
                   <List
                     height={height}
-                    itemCount={filteredLogs.length}
+                    itemCount={getItemCount()}
                     itemSize={40}
                     width={width}
                   >
