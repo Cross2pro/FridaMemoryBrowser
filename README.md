@@ -9,6 +9,19 @@ Frida 内存浏览器是一个强大的工具，用于实时分析和操作 Andr
 模块信息：列出加载的模块及其详细信息。
 - 内存搜索：在指定范围内搜索特定模式。
 - 内存写入：修改进程内存中的数据。
+## 界面展示
+
+### 进程列表
+![进程列表](git_assets/images/进程列表.png)
+
+### 进程详情
+![进程详情](git_assets/images/进程详情.png)
+
+### 模块信息
+![模块信息](git_assets/images/模块信息.png)
+
+### 内存信息
+![内存信息](git_assets/images/内存信息.png)
 
 ## 技术栈
 - 前端：React、TypeScript、Tailwind CSS
