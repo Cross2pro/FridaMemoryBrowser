@@ -30,6 +30,7 @@ interface LogEntry {
 interface LogGroup {
   title: string;
   logs: LogEntry[];
+  isCollapsed?: boolean;
 }
 
 const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
@@ -43,6 +44,7 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
   const [isScriptListCollapsed, setIsScriptListCollapsed] = useState(false);
   const [isGrouped, setIsGrouped] = useState(false);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [groupCollapsedState, setGroupCollapsedState] = useState<{ [key: string]: boolean }>({});
 
   useEffect(() => {
     fetchScripts();
@@ -137,20 +139,18 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
     (log.message && log.message.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // 按函数名分组的日志
   const groupedLogs = useMemo(() => {
     if (!isGrouped) return null;
 
     const groups: { [key: string]: LogEntry[] } = {};
     filteredLogs.forEach(log => {
-      const functionName = log.title.split(' ')[0]; // 假设函数名是标题的第一个词
+      const functionName = log.title.split(' ')[0];
       if (!groups[functionName]) {
         groups[functionName] = [];
       }
       groups[functionName].push(log);
     });
 
-    // 转换为数组并排序
     return Object.entries(groups)
       .map(([title, logs]) => ({
         title,
@@ -158,12 +158,19 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
           sortOrder === 'asc' 
             ? new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
             : new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        )
+        ),
+        isCollapsed: groupCollapsedState[title] || false
       }))
       .sort((a, b) => a.title.localeCompare(b.title));
-  }, [filteredLogs, isGrouped, sortOrder]);
+  }, [filteredLogs, isGrouped, sortOrder, groupCollapsedState]);
 
-  // 排序后的日志
+  const toggleGroupCollapse = (groupTitle: string) => {
+    setGroupCollapsedState(prev => ({
+      ...prev,
+      [groupTitle]: !prev[groupTitle]
+    }));
+  };
+
   const sortedLogs = useMemo(() => {
     if (isGrouped) return filteredLogs;
     return [...filteredLogs].sort((a, b) => 
@@ -175,31 +182,42 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
 
   const LogRow = ({ index, style }: { index: number; style: React.CSSProperties }) => {
     if (isGrouped && groupedLogs) {
-      // 计算当前行所属的组和组内索引
       let currentGroup = 0;
       let currentIndex = index;
-      
-      while (currentIndex >= 0 && currentGroup < groupedLogs.length) {
-        if (currentIndex < groupedLogs[currentGroup].logs.length + 1) {
+      let totalProcessedItems = 0;
+
+      while (currentGroup < groupedLogs.length) {
+        const groupSize = groupedLogs[currentGroup].isCollapsed ? 1 : groupedLogs[currentGroup].logs.length + 1;
+        if (totalProcessedItems + groupSize > currentIndex) {
           break;
         }
-        currentIndex -= groupedLogs[currentGroup].logs.length + 1;
+        totalProcessedItems += groupSize;
         currentGroup++;
       }
 
       if (currentGroup >= groupedLogs.length) return null;
 
-      // 如果是组标题
-      if (currentIndex === 0) {
+      const group = groupedLogs[currentGroup];
+      const relativeIndex = currentIndex - totalProcessedItems;
+
+      if (relativeIndex === 0) {
         return (
-          <div style={style} className="bg-gray-200 py-2 px-4 font-semibold">
-            {groupedLogs[currentGroup].title} ({groupedLogs[currentGroup].logs.length})
+          <div 
+            style={style} 
+            className="bg-gray-200 py-2 px-4 font-semibold cursor-pointer hover:bg-gray-300 flex items-center justify-between"
+            onClick={() => toggleGroupCollapse(group.title)}
+          >
+            <div>
+              <span className="mr-2">{group.isCollapsed ? '►' : '▼'}</span>
+              {group.title} ({group.logs.length})
+            </div>
           </div>
         );
       }
 
-      // 组内的日志项
-      const log = groupedLogs[currentGroup].logs[currentIndex - 1];
+      if (group.isCollapsed) return null;
+
+      const log = group.logs[relativeIndex - 1];
       return (
         <div
           style={style}
@@ -235,8 +253,9 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
 
   const getItemCount = () => {
     if (isGrouped && groupedLogs) {
-      // 计算所有组的总行数（每个组的日志数量 + 组标题行）
-      return groupedLogs.reduce((sum, group) => sum + group.logs.length + 1, 0);
+      return groupedLogs.reduce((sum, group) => {
+        return sum + (group.isCollapsed ? 1 : group.logs.length + 1);
+      }, 0);
     }
     return sortedLogs.length;
   };
@@ -257,7 +276,6 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
         </div>
       )}
       <div className="flex gap-4 h-[calc(100vh-200px)]">
-        {/* 脚本列表 */}
         <div className={`transition-all duration-300 ${isScriptListCollapsed ? 'w-12' : 'w-64'}`}>
           <div className="bg-white shadow-md rounded-lg p-4 h-full">
             <div className="flex justify-between items-center mb-4">
@@ -306,9 +324,7 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
           </div>
         </div>
 
-        {/* 日志区域 */}
         <div className="flex-1 flex flex-col">
-          {/* 搜索、分组和清除按钮 */}
           <div className="flex justify-between items-center mb-4">
             <div className="flex-1 flex items-center gap-4">
               <input
@@ -340,7 +356,6 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
             </button>
           </div>
 
-          {/* 日志列表 */}
           <div className="flex-1 bg-white shadow-md rounded-lg overflow-hidden mb-4">
             <div className="grid grid-cols-4 gap-4 py-2 px-4 bg-gray-100 font-semibold">
               <div>ID</div>
@@ -364,7 +379,6 @@ const ScriptInfo: React.FC<ScriptInfoProps> = ({ pid }) => {
             </div>
           </div>
 
-          {/* 日志详情 */}
           <div className="bg-white shadow-md rounded-lg p-4 h-96 overflow-auto">
             <h3 className="text-lg font-semibold mb-4">日志详情</h3>
             {selectedLog ? (
