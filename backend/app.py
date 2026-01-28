@@ -90,6 +90,27 @@ def handle_inject_script(data):
             script_content = file.read()
         
         script = session.create_script(script_content)
+
+        def on_message(message, data):
+            mtype = message.get('type')
+            if mtype == 'send':
+                try:
+                    print(f"[agent][send] pid={pid} payload={message.get('payload')}")
+                except Exception:
+                    print(f"[agent][send] pid={pid} (unprintable payload)")
+            elif mtype == 'log':
+                # console.log/info/warn/error from the agent
+                level = message.get('level', 'log')
+                payload = message.get('payload')
+                if payload is None:
+                    payload = message.get('description')
+                print(f"[agent][{level}] pid={pid} {payload}")
+            elif mtype == 'error':
+                print(f"[agent][error] pid={pid} {message.get('description')}")
+            else:
+                print(f"[agent][{mtype}] pid={pid} {message}")
+
+        script.on('message', on_message)
         script.load()
         sessions[pid] = (session, script)
         socketio.emit('inject_result', {'success': True, 'pid': pid})
@@ -375,6 +396,62 @@ def handle_clear_script_logs(data):
         socketio.emit('script_logs_cleared', {'success': True, 'pid': pid})
     except Exception as e:
         socketio.emit('script_logs_cleared', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('detect_il2cpp')
+def handle_detect_il2cpp(data):
+    pid = data['pid']
+    print(f"[il2cpp] detect_il2cpp request pid={pid}")
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            print(f"[il2cpp] detect_il2cpp no script for pid={pid}; sessions={list(sessions.keys())}")
+            raise Exception("Script not found for pid: " + str(pid))
+
+        detected = script.exports_sync.detect_il2cpp()
+        print(f"[il2cpp] detect_il2cpp result pid={pid} detected={detected}")
+        socketio.emit('il2cpp_detected', {'success': True, 'pid': pid, 'detected': detected})
+    except Exception as e:
+        print(f"[il2cpp] detect_il2cpp error pid={pid} err={e}")
+        socketio.emit('il2cpp_detected', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_il2cpp_hierarchy')
+def handle_get_il2cpp_hierarchy(data):
+    pid = data['pid']
+    print(f"[il2cpp] get_il2cpp_hierarchy request pid={pid}")
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            print(f"[il2cpp] get_il2cpp_hierarchy no script for pid={pid}; sessions={list(sessions.keys())}")
+            raise Exception("Script not found for pid: " + str(pid))
+
+        hierarchy = script.exports_sync.get_il2cpp_hierarchy()
+        try:
+            count = len(hierarchy)
+        except Exception:
+            count = 'unknown'
+        print(f"[il2cpp] get_il2cpp_hierarchy ok pid={pid} count={count}")
+        socketio.emit('il2cpp_hierarchy', {'success': True, 'pid': pid, 'hierarchy': hierarchy})
+    except Exception as e:
+        print(f"[il2cpp] get_il2cpp_hierarchy error pid={pid} err={e}")
+        socketio.emit('il2cpp_hierarchy', {'success': False, 'pid': pid, 'error': str(e)})
+
+@socketio.on('get_il2cpp_object_details')
+def handle_get_il2cpp_object_details(data):
+    pid = data['pid']
+    address = data['address']
+    print(f"[il2cpp] get_il2cpp_object_details request pid={pid} address={address}")
+    try:
+        _, script = sessions.get(pid, (None, None))
+        if script is None:
+            print(f"[il2cpp] get_il2cpp_object_details no script for pid={pid}; sessions={list(sessions.keys())}")
+            raise Exception("Script not found for pid: " + str(pid))
+
+        details = script.exports_sync.get_il2cpp_object_details(address)
+        print(f"[il2cpp] get_il2cpp_object_details ok pid={pid} address={address}")
+        socketio.emit('il2cpp_object_details', {'success': True, 'pid': pid, 'details': details})
+    except Exception as e:
+        print(f"[il2cpp] get_il2cpp_object_details error pid={pid} address={address} err={e}")
+        socketio.emit('il2cpp_object_details', {'success': False, 'pid': pid, 'error': str(e)})
 
 def compile_agent():
     agent_dir = os.path.join(current_dir, '..', 'agent')
